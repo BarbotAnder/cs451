@@ -3,6 +3,7 @@
 //prevents include loops. there are alternatives to this
 #include <stdlib.h>
 #include <stdbool.h>
+//c++ linker 
 #ifdef __cplusplus
 extern "C"
 {
@@ -14,7 +15,7 @@ extern "C"
      */
     typedef struct node
     {
-        void *data;
+        void *data; //TODO: research 'void *'
         struct node *next;
         struct node *prev;
     } node_t;
@@ -41,8 +42,7 @@ extern "C"
     * @param compare_to Function that will compare two user data elements
     * @return struct list* pointer to the newly allocated list.
     */
-    list_t *list_init(void (*destroy_data)(void *),
-                                 int (*compare_to)(const void *, const void *));
+    list_t *list_init(void (*destroy_data)(void *), int (*compare_to)(const void *, const void *));
 
     /**
      * @brief Destroy the list and and all associated data. This functions will call
@@ -50,7 +50,7 @@ extern "C"
      *
      * @param list a pointer to the list that needs to be destroyed
      */
-    void list_destroy(list_t **list);
+    void list_destroy(list_t **list);    //unnecessary in C++ and rust, due to use of safe pointers.
 
     /**
      * Adds data to the front of the list
