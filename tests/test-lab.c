@@ -242,6 +242,47 @@ void test_notInList(void)
   free(data);
 }
 
+void test_removeEmpty(void)
+{
+    // Test removing from an empty list
+    void *rval = list_remove_index(lst_, 0);
+    TEST_ASSERT_TRUE(rval == NULL);
+    TEST_ASSERT_TRUE(lst_->size == 0);
+
+    // Test finding an index in an empty list
+    int data = 1;
+    int idx = list_indexof(lst_, &data);
+    TEST_ASSERT_EQUAL_INT64(-1, idx);
+}
+
+void test_indexofExisting(void)
+{
+  populate_list();
+  // Test finding an existing element
+  int data = 3;
+  int idx = list_indexof(lst_, &data);
+  TEST_ASSERT_EQUAL_INT(1, idx);
+}
+
+void test_indexofNoValue(void)
+{
+  populate_list();
+  int data = 5;
+  int idx = list_indexof(lst_, &data);
+  TEST_ASSERT_EQUAL_INT(-1, idx);
+}
+
+
+void test_indexofDuplicate(void)
+{
+  // Test finding the first occurrence of a duplicate element
+  populate_list();
+  int data = 1;
+  list_add(lst_, alloc_data(data));
+  int idx = list_indexof(lst_, &data);
+  TEST_ASSERT_EQUAL_INT(0, idx);
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_create_destroy);
@@ -255,5 +296,9 @@ int main(void) {
   RUN_TEST(test_indexOf0);
   RUN_TEST(test_indexOf3);
   RUN_TEST(test_notInList);
+  RUN_TEST(test_removeEmpty);
+  RUN_TEST(test_indexofExisting);
+  RUN_TEST(test_indexofDuplicate);
+
   return UNITY_END();
 }
