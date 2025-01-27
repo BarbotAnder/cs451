@@ -180,6 +180,8 @@ void test_invaidIndex(void)
   void *rval = list_remove_index(lst_, 666);
   TEST_ASSERT_TRUE(rval == NULL);
   TEST_ASSERT_TRUE(lst_->size == 5);
+  free(rval);
+
 
   node_t *curr = lst_->head->next;
   //List should be 4->3->2->1->0
@@ -221,6 +223,7 @@ void test_indexOf0(void)
   void *data = lst_->head->next->data;
   size_t idx = list_indexof(lst_, data);
   TEST_ASSERT_TRUE(idx == 0);
+
 }
 
 void test_indexOf3(void)
@@ -248,6 +251,8 @@ void test_removeEmpty(void)
     void *rval = list_remove_index(lst_, 0);
     TEST_ASSERT_TRUE(rval == NULL);
     TEST_ASSERT_TRUE(lst_->size == 0);
+    free(rval);
+
 
     // Test finding an index in an empty list
     int data = 1;
@@ -283,6 +288,21 @@ void test_indexofDuplicate(void)
   TEST_ASSERT_EQUAL_INT(0, idx);
 }
 
+void test_indexofNullList(void)
+{
+    void *data = alloc_data(1);
+    int idx = list_indexof(NULL, data);
+    TEST_ASSERT_EQUAL_INT(-1, idx);
+    free(data);
+}
+
+void test_indexofNullData(void)
+{
+    populate_list();
+    int idx = list_indexof(lst_, NULL);
+    TEST_ASSERT_EQUAL_INT(-1, idx);
+}
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_create_destroy);
@@ -299,6 +319,8 @@ int main(void) {
   RUN_TEST(test_removeEmpty);
   RUN_TEST(test_indexofExisting);
   RUN_TEST(test_indexofDuplicate);
+  RUN_TEST(test_indexofNullList);
+  RUN_TEST(test_indexofNullData);
 
   return UNITY_END();
 }
