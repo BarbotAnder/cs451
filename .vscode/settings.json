@@ -2,6 +2,8 @@
     "files.associations": {
         "types.h": "c",
         "string.h": "c",
-        "signal.h": "c"
+        "signal.h": "c",
+        "fcntl.h": "c",
+        "lab.h": "c"
     }
 }

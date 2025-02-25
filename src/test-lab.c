@@ -1,6 +1,6 @@
 #include <string.h>
 #include "harness/unity.h"
-#include "../src/lab.h"
+#include "lab.h"
 
 
 void setUp(void) {

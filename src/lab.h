@@ -123,11 +123,7 @@ extern "C"
 
 
 #ifdef __cplusplus
-<<<<<<< HEAD
 } // extern "C"
-=======
-} //extern "C"
->>>>>>> 7506b9948063c2439e05fb54ffd34c31830dbd3a
 #endif
 
 #endif
