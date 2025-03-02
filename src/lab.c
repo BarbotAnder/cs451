@@ -7,6 +7,8 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
 // Set the shell prompt.
 char *get_prompt(const char *env)
@@ -14,7 +16,7 @@ char *get_prompt(const char *env)
     char *prompt = getenv(env); // custom prompt from the environment variable
     if (!prompt)
     {
-        prompt = "shell> "; // default prompt
+        prompt = "shell>"; // default prompt
     }
     return strdup(prompt);
 }
@@ -46,12 +48,12 @@ char **cmd_parse(const char *line)
     char *temp = strdup(line);       // store input line
     char *token = strtok(temp, " "); // tokenize it via spaces
     int i = 0;
-    while (token && i < arg_max) // put args into an array
+    while (token && i < arg_max) // puts args into an array
     {
         args[i++] = strdup(token);
-        token = strtok(NULL, " "); // Get the next token
+        token = strtok(NULL, " "); // Get the next token/arg
     }
-    args[i] = NULL; // Null-terminated array
+    args[i] = NULL; // Null-terminated
     free(temp);
     return args;
 }
@@ -99,6 +101,16 @@ bool do_builtin(struct shell *sh, char **argv)
     if (strcmp(argv[0], "cd") == 0) //'cd' changes dir
     {
         change_dir(argv);
+        return true;
+    }
+
+     if (strcmp(argv[0], "history") == 0) {
+        HIST_ENTRY **history = history_list();
+        if (history) {
+            for (int i = 0; history[i]; i++) {
+                printf("%d %s\n", i + 1, history[i]->line);
+            }
+        }
         return true;
     }
     return false;

@@ -4,6 +4,7 @@
         "string.h": "c",
         "signal.h": "c",
         "fcntl.h": "c",
-        "lab.h": "c"
+        "lab.h": "c",
+        "unity.h": "c"
     }
 }
