@@ -1,326 +1,207 @@
+#include <string.h>
 #include "harness/unity.h"
-#include "../src/lab.h"
-
-
-static list_t *lst_ = NULL;
-
-static int *alloc_data(int i)
-{
-  int *rval = (int *)malloc(sizeof(int));
-  *rval = i;
-  return rval;
-}
-
-static void destroy_data(void *data)
-{
-  free(data);
-}
-
-static int compare_to(const void *a, const void *b)
-{
-  int fst = *(int *)a;
-  int snd = *(int *)b;
-  return fst - snd;
-}
-
-static void populate_list(void)
-{
-  for (int i = 0; i < 5; i++)
-    {
-      list_add(lst_, alloc_data(i));
-    }
-}
+#include "lab.h"
 
 
 void setUp(void) {
-  lst_ = list_init(destroy_data, compare_to);
+  // set stuff up here
 }
 
 void tearDown(void) {
-  list_destroy(&lst_);
+  // clean stuff up here
 }
 
 
-void test_create_destroy(void)
+void test_cmd_parse2(void)
 {
-  list_t *lst = NULL;
-  lst = list_init(destroy_data, compare_to);
-  TEST_ASSERT_FALSE(lst == NULL);
-  TEST_ASSERT_FALSE(lst->head == NULL);
-  TEST_ASSERT_TRUE(lst->size == 0);
-  TEST_ASSERT_TRUE(lst->head->data == NULL);
-  //Make sure the function pointers are pointing to the correct fuctions
-  TEST_ASSERT_TRUE(lst->destroy_data == destroy_data);
-  TEST_ASSERT_TRUE(lst->compare_to == compare_to);
+     //The string we want to parse from the user.
+     //foo -v
+     char *stng = (char*)malloc(sizeof(char)*7);
+     strcpy(stng, "foo -v");
+     char **actual = cmd_parse(stng);
+     //construct our expected output
+     size_t n = sizeof(char*) * 6;
+     char **expected = (char**) malloc(sizeof(char*) *6);
+     memset(expected,0,n);
+     expected[0] = (char*)malloc(sizeof(char)*4);
+     expected[1] = (char*)malloc(sizeof(char)*3);
+     expected[2] = (char*)NULL;
 
-  //Make sure we are a circular linked list
-  TEST_ASSERT_FALSE(lst->head->next == NULL);
-  TEST_ASSERT_FALSE(lst->head->prev == NULL);
-  TEST_ASSERT_TRUE(lst->head->next == lst->head->prev);
+     strcpy(expected[0], "foo");
+     strcpy(expected[1], "-v");
+     TEST_ASSERT_EQUAL_STRING(expected[0],actual[0]);
+     TEST_ASSERT_EQUAL_STRING(expected[1],actual[1]);
+     TEST_ASSERT_FALSE(actual[2]);
+     free(expected[0]);
+     free(expected[1]);
+     free(expected);
+}
 
-  list_destroy(&lst);
-  TEST_ASSERT_TRUE(lst == NULL);
+void test_cmd_parse(void)
+{
+     char **rval = cmd_parse("ls -a -l");
+     TEST_ASSERT_TRUE(rval);
+     TEST_ASSERT_EQUAL_STRING("ls", rval[0]);
+     TEST_ASSERT_EQUAL_STRING("-a", rval[1]);
+     TEST_ASSERT_EQUAL_STRING("-l", rval[2]);
+     TEST_ASSERT_EQUAL_STRING(NULL, rval[3]);
+     TEST_ASSERT_FALSE(rval[3]);
+     cmd_free(rval);
+}
+
+void test_trim_white_no_whitespace(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, "ls -a", 10);
+     char *rval = trim_white(line);
+     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
+     free(line);
+}
+
+void test_trim_white_start_whitespace(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, "  ls -a", 10);
+     char *rval = trim_white(line);
+     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
+     free(line);
+}
+
+void test_trim_white_end_whitespace(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, "ls -a  ", 10);
+     char *rval = trim_white(line);
+     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
+     free(line);
+}
+
+void test_trim_white_both_whitespace_single(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, " ls -a ", 10);
+     char *rval = trim_white(line);
+     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
+     free(line);
+}
+
+void test_trim_white_both_whitespace_double(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, "  ls -a  ", 10);
+     char *rval = trim_white(line);
+     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
+     free(line);
+}
+
+void test_trim_white_all_whitespace(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, "  ", 10);
+     char *rval = trim_white(line);
+     TEST_ASSERT_EQUAL_STRING("", rval);
+     free(line);
+}
+
+void test_trim_white_mostly_whitespace(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, "    a    ", 10);
+     char *rval = trim_white(line);
+     TEST_ASSERT_EQUAL_STRING("a", rval);
+     free(line);
+}
+
+void test_get_prompt_default(void)
+{
+     char *prompt = get_prompt("MY_PROMPT");
+     TEST_ASSERT_EQUAL_STRING(prompt, "shell>");
+     free(prompt);
+}
+
+void test_get_prompt_custom(void)
+{
+     const char* prmpt = "MY_PROMPT";
+     if(setenv(prmpt,"foo>",true)){
+          TEST_FAIL();
+     }
+
+     char *prompt = get_prompt(prmpt);
+     TEST_ASSERT_EQUAL_STRING(prompt, "foo>");
+     free(prompt);
+     unsetenv(prmpt);
+}
+
+void test_ch_dir_home(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, "cd", 10);
+     char **cmd = cmd_parse(line);
+     char *expected = getenv("HOME");
+     change_dir(cmd);
+     char *actual = getcwd(NULL,0);
+     TEST_ASSERT_EQUAL_STRING(expected, actual);
+     free(line);
+     free(actual);
+     cmd_free(cmd);
+}
+
+void test_ch_dir_root(void)
+{
+     char *line = (char*) calloc(10, sizeof(char));
+     strncpy(line, "cd /", 10);
+     char **cmd = cmd_parse(line);
+     change_dir(cmd);
+     char *actual = getcwd(NULL,0);
+     TEST_ASSERT_EQUAL_STRING("/", actual);
+     free(line);
+     free(actual);
+     cmd_free(cmd);
+}
+
+void test_free(void) {
+  char **cmd = cmd_parse("cd /");
+  cmd_free(cmd);
+  //passes if no leaks or crashes
 }
 
 
-void test_add1(void)
-{
-  list_add(lst_, alloc_data(1));
-  TEST_ASSERT_TRUE(lst_->size == 1);
-  //With one node both next and prev should be equal
-  TEST_ASSERT_TRUE(lst_->head->next == lst_->head->prev);
-  //Make sure we didn't clobber our sentinel node
-  TEST_ASSERT_FALSE(lst_->head == lst_->head->next);
-  TEST_ASSERT_FALSE(lst_->head == lst_->head->prev);
-  TEST_ASSERT_TRUE(lst_->head->data == NULL);
-
-  //Check to make sure our data actually made it into the node
-  TEST_ASSERT_TRUE(*((int *)lst_->head->next->data) == 1);
-  TEST_ASSERT_TRUE(*((int *)lst_->head->prev->data) == 1);
+void test_history_init(void) {
+  init_history();
+  //passes if no leaks or crashes
 }
 
-void test_add2(void)
-{
-  list_add(lst_, alloc_data(1));
-  TEST_ASSERT_TRUE(lst_->size == 1);
-  list_add(lst_, alloc_data(2));
-  TEST_ASSERT_TRUE(lst_->size == 2);
-
-  //With two nodes both next and prev should NOT be equal
-  TEST_ASSERT_FALSE(lst_->head->next == lst_->head->prev);
-  //Make sure we didn't clobber our sentinel node
-  TEST_ASSERT_FALSE(lst_->head == lst_->head->next);
-  TEST_ASSERT_FALSE(lst_->head == lst_->head->prev);
-  TEST_ASSERT_TRUE(lst_->head->data == NULL);
-
-  //Check to make sure our next and prev have the correct data
-  TEST_ASSERT_TRUE(*((int *)lst_->head->next->data) == 2);
-  TEST_ASSERT_TRUE(*((int *)lst_->head->prev->data) == 1);
+void test_history_add(void) {
+  init_history();
+  add_history_entry("cd /");
+  //passes if no leaks or crashes
 }
 
-
-void test_removeIndex0(void)
-{
-  populate_list();
-  int *rval = (int *)list_remove_index(lst_, 0);
-  TEST_ASSERT_TRUE(lst_->size == 4);
-  TEST_ASSERT_TRUE(*rval == 4);
-  free(rval);
-
-  node_t *curr = lst_->head->next;
-  //List should be 3->2->1->0
-  for (int i = 3; i >= 0; i--)
-    {
-      TEST_ASSERT_TRUE(*((int *)curr->data) == i);
-      curr = curr->next;
-    }
-  curr = lst_->head->prev;
-  for (int i = 0; i <= 3; i++)
-    {
-      TEST_ASSERT_TRUE(*((int *)curr->data) == i);
-      curr = curr->prev;
-    }
-}
-
-void test_removeIndex3(void)
-{
-  populate_list();
-  int *rval = (int *)list_remove_index(lst_, 3);
-  TEST_ASSERT_TRUE(lst_->size == 4);
-  TEST_ASSERT_TRUE(*rval == 1);
-  free(rval);
-
-  node_t *curr = lst_->head->next;
-  //List should be 4->3->2->0
-  for (int i = 3; i >= 1; i--)
-    {
-      TEST_ASSERT_TRUE(*((int *)curr->data) == i + 1);
-      curr = curr->next;
-    }
-  //Check the last one
-  TEST_ASSERT_TRUE(*((int *)curr->data) == 0);
-
-  //Set the curr back one node so we can check prev links
-  curr = curr->prev;
-  for (int i = 1; i <= 3; i++)
-    {
-      TEST_ASSERT_TRUE(*((int *)curr->data) == i + 1);
-      curr = curr->prev;
-    }
-}
-
-
-void test_removeIndex4(void)
-{
-  populate_list();
-  int *rval = (int *)list_remove_index(lst_, 4);
-  TEST_ASSERT_TRUE(lst_->size == 4);
-  TEST_ASSERT_TRUE(*rval == 0);
-  free(rval);
-
-  node_t *curr = lst_->head->next;
-  //List should be 4->3->2->1
-  for (int i = 3; i >= 0; i--)
-    {
-      TEST_ASSERT_TRUE(*((int *)curr->data) == i + 1);
-      curr = curr->next;
-    }
-  curr = lst_->head->prev;
-  for (int i = 0; i <= 3; i++)
-    {
-      TEST_ASSERT_TRUE(*((int *)curr->data) == i + 1);
-      curr = curr->prev;
-    }
-}
-
-
-void test_invaidIndex(void)
-{
-  populate_list();
-  void *rval = list_remove_index(lst_, 666);
-  TEST_ASSERT_TRUE(rval == NULL);
-  TEST_ASSERT_TRUE(lst_->size == 5);
-  free(rval);
-
-
-  node_t *curr = lst_->head->next;
-  //List should be 4->3->2->1->0
-  for (int i = 4; i >= 0; i--)
-    {
-      TEST_ASSERT_TRUE(*((int *)curr->data) ==  i);
-      curr = curr->next;
-    }
-
-  for (int i = 0; i >= 4; i++)
-    {
-      TEST_ASSERT_TRUE(*((int *)curr->data) == i);
-      curr = curr->prev;
-    }
-}
-
-void test_removeAll(void)
-{
-  populate_list();
-  //List should be 4->3->2->1->0
-  for (int i = 4; i >= 0; i--)
-    {
-      int *rval = (int *)list_remove_index(lst_, 0);
-      TEST_ASSERT_TRUE(*rval == i);
-      free(rval);
-    }
-
-  //Make sure we back to default
-  TEST_ASSERT_FALSE(lst_->head->next == NULL);
-  TEST_ASSERT_FALSE(lst_->head->prev == NULL);
-  TEST_ASSERT_TRUE(lst_->head->next == lst_->head->prev);
-  TEST_ASSERT_TRUE(lst_->size == 0);
-}
-
-void test_indexOf0(void)
-{
-  populate_list();
-  //List should be 4->3->2->1->0
-  void *data = lst_->head->next->data;
-  size_t idx = list_indexof(lst_, data);
-  TEST_ASSERT_TRUE(idx == 0);
-
-}
-
-void test_indexOf3(void)
-{
-  populate_list();
-  //List should be 4->3->2->1->0
-  void *data = alloc_data(1);
-  size_t idx = list_indexof(lst_, data);
-  TEST_ASSERT_TRUE(idx == 3);
-  free(data);
-}
-
-void test_notInList(void)
-{
-  populate_list();
-  void *data = alloc_data(22);
-  int idx = list_indexof(lst_, data);
-  TEST_ASSERT_EQUAL_INT64(-1, idx);
-  free(data);
-}
-
-void test_removeEmpty(void)
-{
-    // Test removing from an empty list
-    void *rval = list_remove_index(lst_, 0);
-    TEST_ASSERT_TRUE(rval == NULL);
-    TEST_ASSERT_TRUE(lst_->size == 0);
-    free(rval);
-
-
-    // Test finding an index in an empty list
-    int data = 1;
-    int idx = list_indexof(lst_, &data);
-    TEST_ASSERT_EQUAL_INT64(-1, idx);
-}
-
-void test_indexofExisting(void)
-{
-  populate_list();
-  // Test finding an existing element
-  int data = 3;
-  int idx = list_indexof(lst_, &data);
-  TEST_ASSERT_EQUAL_INT(1, idx);
-}
-
-void test_indexofNoValue(void)
-{
-  populate_list();
-  int data = 5;
-  int idx = list_indexof(lst_, &data);
-  TEST_ASSERT_EQUAL_INT(-1, idx);
-}
-
-
-void test_indexofDuplicate(void)
-{
-  // Test finding the first occurrence of a duplicate element
-  populate_list();
-  int data = 1;
-  list_add(lst_, alloc_data(data));
-  int idx = list_indexof(lst_, &data);
-  TEST_ASSERT_EQUAL_INT(0, idx);
-}
-
-void test_indexofNullList(void)
-{
-    void *data = alloc_data(1);
-    int idx = list_indexof(NULL, data);
-    TEST_ASSERT_EQUAL_INT(-1, idx);
-    free(data);
-}
-
-void test_indexofNullData(void)
-{
-    populate_list();
-    int idx = list_indexof(lst_, NULL);
-    TEST_ASSERT_EQUAL_INT(-1, idx);
+void test_history_print(void) {
+  init_history();
+  add_history_entry("cd /");
+  print_history();
+  //passes if no leaks or crashes
 }
 
 int main(void) {
   UNITY_BEGIN();
-  RUN_TEST(test_create_destroy);
-  RUN_TEST(test_add1);
-  RUN_TEST(test_add2);
-  RUN_TEST(test_removeIndex0);
-  RUN_TEST(test_removeIndex3);
-  RUN_TEST(test_removeIndex4);
-  RUN_TEST(test_invaidIndex);
-  RUN_TEST(test_removeAll);
-  RUN_TEST(test_indexOf0);
-  RUN_TEST(test_indexOf3);
-  RUN_TEST(test_notInList);
-  RUN_TEST(test_removeEmpty);
-  RUN_TEST(test_indexofExisting);
-  RUN_TEST(test_indexofDuplicate);
-  RUN_TEST(test_indexofNullList);
-  RUN_TEST(test_indexofNullData);
+  RUN_TEST(test_cmd_parse);
+  RUN_TEST(test_cmd_parse2);
+  RUN_TEST(test_trim_white_no_whitespace);
+  RUN_TEST(test_trim_white_start_whitespace);
+  RUN_TEST(test_trim_white_end_whitespace);
+  RUN_TEST(test_trim_white_both_whitespace_single);
+  RUN_TEST(test_trim_white_both_whitespace_double);
+  RUN_TEST(test_trim_white_all_whitespace);
+  RUN_TEST(test_get_prompt_default);
+  RUN_TEST(test_get_prompt_custom);
+  RUN_TEST(test_ch_dir_home);
+  RUN_TEST(test_ch_dir_root);
+  RUN_TEST(test_free);
+  RUN_TEST(test_history_init);
+  RUN_TEST(test_history_add);
+  RUN_TEST(test_history_print);
 
   return UNITY_END();
 }
