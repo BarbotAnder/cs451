@@ -1,242 +1,149 @@
-#include <string.h>
+#include <assert.h>
+#include <stdlib.h>
+#include <time.h>
+#ifdef __APPLE__
+#include <sys/errno.h>
+#else
+#include <errno.h>
+#endif
 #include "harness/unity.h"
 #include "../src/lab.h"
 
-void setUp(void)
-{
-     // set stuff up here
+
+void setUp(void) {
+  // set stuff up here
 }
 
-void tearDown(void)
-{
-     // clean stuff up here
+void tearDown(void) {
+  // clean stuff up here
 }
 
-void test_cmd_parse(void)
+
+
+/**
+ * Check the pool to ensure it is full.
+ */
+void check_buddy_pool_full(struct buddy_pool *pool)
 {
-     char **rval = cmd_parse("ls -a -l");
-     TEST_ASSERT_TRUE(rval);
-     TEST_ASSERT_EQUAL_STRING("ls", rval[0]);
-     TEST_ASSERT_EQUAL_STRING("-a", rval[1]);
-     TEST_ASSERT_EQUAL_STRING("-l", rval[2]);
-     TEST_ASSERT_EQUAL_STRING(NULL, rval[3]);
-     TEST_ASSERT_FALSE(rval[3]);
-     cmd_free(rval);
+  //A full pool should have all values 0-(kval-1) as empty
+  for (size_t i = 0; i < pool->kval_m; i++)
+    {
+      assert(pool->avail[i].next == &pool->avail[i]);
+      assert(pool->avail[i].prev == &pool->avail[i]);
+      assert(pool->avail[i].tag == BLOCK_UNUSED);
+      assert(pool->avail[i].kval == i);
+    }
+
+  //The avail array at kval should have the base block
+  assert(pool->avail[pool->kval_m].next->tag == BLOCK_AVAIL);
+  assert(pool->avail[pool->kval_m].next->next == &pool->avail[pool->kval_m]);
+  assert(pool->avail[pool->kval_m].prev->prev == &pool->avail[pool->kval_m]);
+
+  //Check to make sure the base address points to the starting pool
+  //If this fails either buddy_init is wrong or we have corrupted the
+  //buddy_pool struct.
+  assert(pool->avail[pool->kval_m].next == pool->base);
 }
 
-void test_cmd_parse2(void)
+/**
+ * Check the pool to ensure it is empty.
+ */
+void check_buddy_pool_empty(struct buddy_pool *pool)
 {
-     // The string we want to parse from the user.
-     // foo -v
-     char *stng = (char *)malloc(sizeof(char) * 7);
-     strcpy(stng, "foo -v");
-     char **actual = cmd_parse(stng);
-     // construct our expected output
-     size_t n = sizeof(char *) * 6;
-     char **expected = (char **)malloc(sizeof(char *) * 6);
-     memset(expected, 0, n);
-     expected[0] = (char *)malloc(sizeof(char) * 4);
-     expected[1] = (char *)malloc(sizeof(char) * 3);
-     expected[2] = (char *)NULL;
-
-     strcpy(expected[0], "foo");
-     strcpy(expected[1], "-v");
-     TEST_ASSERT_EQUAL_STRING(expected[0], actual[0]);
-     TEST_ASSERT_EQUAL_STRING(expected[1], actual[1]);
-     TEST_ASSERT_FALSE(actual[2]);
-     free(expected[0]);
-     free(expected[1]);
-     free(expected);
+  //An empty pool should have all values 0-(kval) as empty
+  for (size_t i = 0; i <= pool->kval_m; i++)
+    {
+      assert(pool->avail[i].next == &pool->avail[i]);
+      assert(pool->avail[i].prev == &pool->avail[i]);
+      assert(pool->avail[i].tag == BLOCK_UNUSED);
+      assert(pool->avail[i].kval == i);
+    }
 }
 
-void test_trim_white_no_whitespace(void)
+/**
+ * Test allocating 1 byte to make sure we split the blocks all the way down
+ * to MIN_K size. Then free the block and ensure we end up with a full
+ * memory pool again
+ */
+void test_buddy_malloc_one_byte(void)
 {
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, "ls -a", 10);
-     char *rval = trim_white(line);
-     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
-     free(line);
+  fprintf(stderr, "->Test allocating and freeing 1 byte\n");
+  struct buddy_pool pool;
+  int kval = MIN_K;
+  size_t size = UINT64_C(1) << kval;
+  buddy_init(&pool, size);
+  void *mem = buddy_malloc(&pool, 1);
+  //Make sure correct kval was allocated
+  buddy_free(&pool, mem);
+  check_buddy_pool_full(&pool);
+  buddy_destroy(&pool);
 }
 
-void test_trim_white_start_whitespace(void)
+/**
+ * Tests the allocation of one massive block that should consume the entire memory
+ * pool and makes sure that after the pool is empty we correctly fail subsequent calls.
+ */
+void test_buddy_malloc_one_large(void)
 {
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, "  ls -a", 10);
-     char *rval = trim_white(line);
-     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
-     free(line);
+  fprintf(stderr, "->Testing size that will consume entire memory pool\n");
+  struct buddy_pool pool;
+  size_t bytes = UINT64_C(1) << MIN_K;
+  buddy_init(&pool, bytes);
+
+  //Ask for an exact K value to be allocated. This test makes assumptions on
+  //the internal details of buddy_init.
+  size_t ask = bytes - sizeof(struct avail);
+  void *mem = buddy_malloc(&pool, ask);
+  assert(mem != NULL);
+
+  //Move the pointer back and make sure we got what we expected
+  struct avail *tmp = (struct avail *)mem - 1;
+  assert(tmp->kval == MIN_K);
+  assert(tmp->tag == BLOCK_RESERVED);
+  check_buddy_pool_empty(&pool);
+
+  //Verify that a call on an empty tool fails as expected and errno is set to ENOMEM.
+  void *fail = buddy_malloc(&pool, 5);
+  assert(fail == NULL);
+  assert(errno = ENOMEM);
+
+  //Free the memory and then check to make sure everything is OK
+  buddy_free(&pool, mem);
+  check_buddy_pool_full(&pool);
+  buddy_destroy(&pool);
 }
 
-void test_trim_white_end_whitespace(void)
+/**
+ * Tests to make sure that the struct buddy_pool is correct and all fields
+ * have been properly set kval_m, avail[kval_m], and base pointer after a
+ * call to init
+ */
+void test_buddy_init(void)
 {
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, "ls -a  ", 10);
-     char *rval = trim_white(line);
-     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
-     free(line);
+  fprintf(stderr, "->Testing buddy init\n");
+  //Loop through all kval MIN_k-DEFAULT_K and make sure we get the correct amount allocated.
+  //We will check all the pointer offsets to ensure the pool is all configured correctly
+  for (size_t i = MIN_K; i <= DEFAULT_K; i++)
+    {
+      size_t size = UINT64_C(1) << i;
+      struct buddy_pool pool;
+      buddy_init(&pool, size);
+      check_buddy_pool_full(&pool);
+      buddy_destroy(&pool);
+    }
 }
 
-void test_trim_white_both_whitespace_single(void)
-{
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, " ls -a ", 10);
-     char *rval = trim_white(line);
-     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
-     free(line);
-}
 
-void test_trim_white_both_whitespace_double(void)
-{
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, "  ls -a  ", 10);
-     char *rval = trim_white(line);
-     TEST_ASSERT_EQUAL_STRING("ls -a", rval);
-     free(line);
-}
+int main(void) {
+  time_t t;
+  unsigned seed = (unsigned)time(&t);
+  fprintf(stderr, "Random seed:%d\n", seed);
+  srand(seed);
+  printf("Running memory tests.\n");
 
-void test_trim_white_all_whitespace(void)
-{
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, "  ", 10);
-     char *rval = trim_white(line);
-     TEST_ASSERT_EQUAL_STRING("", rval);
-     free(line);
-}
-
-void test_trim_white_mostly_whitespace(void)
-{
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, "    a    ", 10);
-     char *rval = trim_white(line);
-     TEST_ASSERT_EQUAL_STRING("a", rval);
-     free(line);
-}
-
-void test_get_prompt_default(void)
-{
-     char *prompt = get_prompt("MY_PROMPT");
-     TEST_ASSERT_EQUAL_STRING(prompt, "shell>");
-     free(prompt);
-}
-
-void test_get_prompt_custom(void)
-{
-     const char *prmpt = "MY_PROMPT";
-     if (setenv(prmpt, "foo>", true))
-     {
-          TEST_FAIL();
-     }
-
-     char *prompt = get_prompt(prmpt);
-     TEST_ASSERT_EQUAL_STRING(prompt, "foo>");
-     free(prompt);
-     unsetenv(prmpt);
-}
-
-void test_ch_dir_home(void)
-{
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, "cd", 10);
-     char **cmd = cmd_parse(line);
-     char *expected = getenv("HOME");
-     change_dir(cmd);
-     char *actual = getcwd(NULL, 0);
-     TEST_ASSERT_EQUAL_STRING(expected, actual);
-     free(line);
-     free(actual);
-     cmd_free(cmd);
-}
-
-void test_ch_dir_root(void)
-{
-     char *line = (char *)calloc(10, sizeof(char));
-     strncpy(line, "cd /", 10);
-     char **cmd = cmd_parse(line);
-     change_dir(cmd);
-     char *actual = getcwd(NULL, 0);
-     TEST_ASSERT_EQUAL_STRING("/", actual);
-     free(line);
-     free(actual);
-     cmd_free(cmd);
-}
-
-// new TC's!
-void test_free(void)
-{
-     char **cmd = cmd_parse("cd /");
-     cmd_free(cmd);
-     // passes if no leaks or crashes
-}
-
-// tests empty cmd string
-void test_cmd_parse0(void)
-{
-     char **result = cmd_parse("");
-     TEST_ASSERT_NOT_NULL(result);
-     TEST_ASSERT_NULL(result[0]);
-     cmd_free(result);
-}
-
-// tests 1 arg cmd string
-void test_cmd_parse1(void)
-{
-     char **result = cmd_parse("foo");
-     TEST_ASSERT_EQUAL_STRING("foo", result[0]);
-     TEST_ASSERT_NULL(result[1]);
-     cmd_free(result);
-}
-
-// tests invalid command string
-void test_invalid_builtin(void)
-{
-     char *line = "notacommand";
-     char **cmd = cmd_parse(line);
-     int result = do_builtin(NULL, cmd);
-     TEST_ASSERT_FALSE(result);
-     cmd_free(cmd);
-}
-
-// tests if history runs
-// TODO: test if prints out correct history
-void test_history(void)
-{
-     char *stng1 = "ls -a";
-     char *stng2 = "pwd";
-     char *stng3 = "cd /";
-     char **cmd1 = cmd_parse(stng1);
-     char **cmd2 = cmd_parse(stng2);
-     char **cmd3 = cmd_parse(stng3);
-     cmd_free(cmd1);
-     cmd_free(cmd2);
-     cmd_free(cmd3);
-
-     char **history = cmd_parse("history"); // true if it works, else false
-     TEST_ASSERT_TRUE(do_builtin(NULL, history));
-     cmd_free(history);
-}
-
-// maybe test the signal handling...? I cant figure that out
-
-int main(void)
-{
-     UNITY_BEGIN();
-     RUN_TEST(test_cmd_parse);
-     RUN_TEST(test_cmd_parse2);
-     RUN_TEST(test_trim_white_no_whitespace);
-     RUN_TEST(test_trim_white_start_whitespace);
-     RUN_TEST(test_trim_white_end_whitespace);
-     RUN_TEST(test_trim_white_both_whitespace_single);
-     RUN_TEST(test_trim_white_both_whitespace_double);
-     RUN_TEST(test_trim_white_all_whitespace);
-     RUN_TEST(test_get_prompt_default);
-     RUN_TEST(test_get_prompt_custom);
-     RUN_TEST(test_ch_dir_home);
-     RUN_TEST(test_ch_dir_root);
-     RUN_TEST(test_free);
-     RUN_TEST(test_cmd_parse0);
-     RUN_TEST(test_cmd_parse1);
-     RUN_TEST(test_invalid_builtin);
-     RUN_TEST(test_history);
-
-     return UNITY_END();
+  UNITY_BEGIN();
+  RUN_TEST(test_buddy_init);
+  RUN_TEST(test_buddy_malloc_one_byte);
+  RUN_TEST(test_buddy_malloc_one_large);
+return UNITY_END();
 }

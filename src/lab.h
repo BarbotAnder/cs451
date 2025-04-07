@@ -1,129 +1,178 @@
 #ifndef LAB_H
 #define LAB_H
-#include <stdlib.h>
-#include <stdbool.h>
-#include <sys/types.h>
-#include <termios.h>
-#include <unistd.h>
 
-#define lab_VERSION_MAJOR 1
-#define lab_VERSION_MINOR 0
-#define UNUSED(x) (void)x;
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+  /**
+   * The default amount of memory that this memory manger will manage unless
+   * explicitly set with buddy_init. The number of bytes is calculated as 2^DEFAULT_K
+   */
+#define DEFAULT_K 30
 
-  struct shell
+  /**
+   * The minimum size of the buddy memory pool.
+   */
+#define MIN_K 20
+
+  /**
+   * The maximum size of the buddy memory pool. This is 1 larger than needed
+   * to allow indexes 1-N instead of 0-N. Internally the maximum amount of
+   * memory is MAX_K-1
+   */
+#define MAX_K 48
+
+  /**
+   * The smallest memory block size that can be returned by buddy_malloc value must
+   * be large enough to account for the avail header.
+   */
+#define SMALLEST_K 6
+
+#define BLOCK_AVAIL    1  /*Block is available to allocate*/
+#define BLOCK_RESERVED 0  /*Block has been handed to user*/
+#define BLOCK_UNUSED   3  /*Block is not used at all*/
+
+  /**
+   * Struct to represent the table of all available blocks do not reorder members
+   * of this struct because internal calculations depend on the ordering.
+   */
+  struct avail
   {
-    int shell_is_interactive;
-    pid_t shell_pgid;
-    struct termios shell_tmodes;
-    int shell_terminal;
-    char *prompt;
+    unsigned short int tag;     /*Tag for block status BLOCK_AVAIL, BLOCK_RESERVED*/
+    unsigned short int kval;    /*The kval of this block*/
+    struct avail *next;         /*next memory block*/
+    struct avail *prev;         /*prev memory block*/
   };
 
+  /**
+   * The buddy memory pool.
+   */
+  struct buddy_pool
+  {
+    size_t kval_m;              /*The max kval of this pool*/
+    size_t numbytes;            /*The number of bytes this pool is managing*/
+    void *base;                 /*Base address used to scale memory for buddy calculations*/
+    struct avail avail[MAX_K];  /*The array of available memory blocks*/
+  };
+
+  /**
+   * Converts bytes to its equivalent K value defined as bytes <= 2^K
+   * @param bytes The bytes needed
+   * @return K The number of bytes expressed as 2^K
+   */
+  size_t btok(size_t bytes);
 
 
   /**
-   * @brief Set the shell prompt. This function will attempt to load a prompt
-   * from the requested environment variable, if the environment variable is
-   * not set a default prompt of "shell>" is returned.  This function calls
-   * malloc internally and the caller must free the resulting string.
-   *
-   * @param env The environment variable
-   * @return const char* The prompt
+   * Find the buddy of a given pointer and kval relative to the base address we got from mmap
+   * @param pool The memory pool to work on (needed for the base addresses)
+   * @param buddy The memory block that we want to find the buddy for
+   * @return A pointer to the buddy
    */
-  char *get_prompt(const char *env);
+  struct avail *buddy_calc(struct buddy_pool *pool, struct avail *buddy);
 
   /**
-   * Changes the current working directory of the shell. Uses the linux system
-   * call chdir. With no arguments the users home directory is used as the
-   * directory to change to.
+   * Allocates a block of size bytes of memory, returning a pointer to
+   * the beginning of the block. The content of the newly allocated block
+   * of memory is not initialized, remaining with indeterminate values.
    *
-   * @param dir The directory to change to
-   * @return  On success, zero is returned.  On error, -1 is returned, and
-   * errno is set to indicate the error.
+   * If size is zero, the return value will be NULL
+   * If pool is NULL, the return value will be NULL
+   *
+   * @param pool The memory pool to alloc from
+   * @param size The size of the user requested memory block in bytes
+   * @return A pointer to the memory block
    */
-  int change_dir(char **dir);
+  void *buddy_malloc(struct buddy_pool *pool, size_t size);
 
   /**
-   * @brief Convert line read from the user into to format that will work with
-   * execvp. We limit the number of arguments to ARG_MAX loaded from sysconf.
-   * This function allocates memory that must be reclaimed with the cmd_free
-   * function.
+   * A block of memory previously allocated by a call to malloc,
+   * calloc or realloc is deallocated, making it available again
+   * for further allocations.
    *
-   * @param line The line to process
+   * If ptr does not point to a block of memory allocated with
+   * the above functions, it causes undefined behavior.
    *
-   * @return The line read in a format suitable for exec
+   * If ptr is a null pointer, the function does nothing.
+   * Notice that this function does not change the value of ptr itself,
+   * hence it still points to the same (now invalid) location.
+   *
+   * @param pool The memory pool
+   * @param ptr Pointer to the memory block to free
    */
-  char **cmd_parse(char const *line);
+  void buddy_free(struct buddy_pool *pool, void *ptr);
 
   /**
-   * @brief Free the line that was constructed with parse_cmd
+   * Changes the size of the memory block pointed to by ptr.
+   * The function may move the memory block to a new location
+   * (whose address is returned by the function).
+   * The content of the memory block is preserved up to the
+   * lesser of the new and old sizes, even if the block is
+   * moved to a new location. If the new size is larger,
+   * the value of the newly allocated portion is indeterminate.
    *
-   * @param line the line to free
+   * In case that ptr is a null pointer, the function behaves
+   * like malloc, assigning a new block of size bytes and
+   * returning a pointer to its beginning.
+   *
+   * if size is equal to zero, and ptr is not NULL, then the  call
+   * is equivalent to free(ptr)
+   *
+   * @param pool The memory pool
+   * @param ptr Pointer to a memory block
+   * @param size The new size of the memory block
+   * @return Pointer to the new memory block
    */
-  void cmd_free(char ** line);
+  void *buddy_realloc(struct buddy_pool *pool, void *ptr, size_t size);
 
   /**
-   * @brief Trim the whitespace from the start and end of a string.
-   * For example "   ls -a   " becomes "ls -a". This function modifies
-   * the argument line so that all printable chars are moved to the
-   * front of the string
+   * Initialize a new memory pool using the buddy algorithm. Internally,
+   * this function uses mmap to get a block of memory to manage so should be
+   * portable to any system that implements mmap. This function will round
+   * up to the nearest power of two. So if the user requests 503MiB
+   * it will be rounded up to 512MiB.
    *
-   * @param line The line to trim
-   * @return The new line with no whitespace
+   * Note that if a 0 is passed as an argument then it initializes
+   * the memory pool to be of the default size of DEFAULT_K. If the caller
+   * specifies an unreasonably small size, then the buddy system may
+   * not be able to satisfy any requests.
+   *
+   * NOTE: Memory pools returned by this function can not be intermingled.
+   * Calling buddy_malloc with pool A and then calling buddy_free with
+   * pool B will result in undefined behavior.
+   *
+   * @param size The size of the pool in bytes.
+   * @param pool A pointer to the pool to initialize
    */
-  char *trim_white(char *line);
-
+  void buddy_init(struct buddy_pool *pool, size_t size);
 
   /**
-   * @brief Takes an argument list and checks if the first argument is a
-   * built in command such as exit, cd, jobs, etc. If the command is a
-   * built in command this function will handle the command and then return
-   * true. If the first argument is NOT a built in command this function will
-   * return false.
+   * Inverse of buddy_init.
    *
-   * @param sh The shell
-   * @param argv The command to check
-   * @return True if the command was a built in command
+   * Notice that this function does not change the value of pool itself,
+   * hence it still points to the same (now invalid) location.
+   *
+   * @param pool The memory pool to destroy
    */
-  bool do_builtin(struct shell *sh, char **argv);
+  void buddy_destroy(struct buddy_pool *pool);
 
   /**
-   * @brief Initialize the shell for use. Allocate all data structures
-   * Grab control of the terminal and put the shell in its own
-   * process group. NOTE: This function will block until the shell is
-   * in its own program group. Attaching a debugger will always cause
-   * this function to fail because the debugger maintains control of
-   * the subprocess it is debugging.
+   * @brief Entry to a main function for testing purposes
    *
-   * @param sh
+   * @param argc system argc
+   * @param argv system argv
+   * @return exit status
    */
-  void sh_init(struct shell *sh);
-
-  /**
-   * @brief Destroy shell. Free any allocated memory and resources and exit
-   * normally.
-   *
-   * @param sh
-   */
-  void sh_destroy(struct shell *sh);
-
-  /**
-   * @brief Parse command line args from the user when the shell was launched
-   *
-   * @param argc Number of args
-   * @param argv The arg array
-   */
-  void parse_args(int argc, char **argv);
-
-
+  int myMain(int argc, char** argv);
 
 #ifdef __cplusplus
-} // extern "C"
+} //extern "C"
 #endif
 
 #endif

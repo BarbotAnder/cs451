@@ -1,165 +1,160 @@
-#include "lab.h"
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdbool.h>
+#include <sys/mman.h>
 #include <string.h>
-#include <unistd.h>
-#include <pwd.h>
+#include <stddef.h>
+#include <assert.h>
 #include <signal.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <readline/readline.h>
-#include <readline/history.h>
+#include <execinfo.h>
+#include <unistd.h>
+#include <time.h>
+#ifdef __APPLE__
+#include <sys/errno.h>
+#else
+#include <errno.h>
+#endif
 
-// Set the shell prompt.
-char *get_prompt(const char *env)
+#include "lab.h"
+
+#define handle_error_and_die(msg) \
+    do                            \
+    {                             \
+        perror(msg);              \
+        raise(SIGKILL);          \
+    } while (0)
+
+/**
+ * @brief Convert bytes to the correct K value
+ *
+ * @param bytes the number of bytes
+ * @return size_t the K value that will fit bytes
+ */
+size_t btok(size_t bytes)
 {
-    char *prompt = getenv(env); // custom prompt from the environment variable
-    if (!prompt)
-    {
-        prompt = "shell>"; // default prompt
-    }
-    return strdup(prompt);
+    //DO NOT use math.pow
 }
 
-// Changes the current working directory of the shell.
-int change_dir(char **argv)
+struct avail *buddy_calc(struct buddy_pool *pool, struct avail *buddy)
 {
-    const char *dir = argv[1] ? argv[1] : getenv("HOME"); // default is HOME
-    if (!dir)                                             // nothing found, get home directory from the passwd struct
-    {
-        struct passwd *pw = getpwuid(getuid());
-        dir = pw ? pw->pw_dir : "/"; // Default is root
-    }
-    if (chdir(dir) != 0) // actually change the directory
-    {
-        perror("cd failed");
-        return -1;
-    }
-    return 0;
+
 }
 
-// Parse the user input into a format suitable for execvp.
-char **cmd_parse(const char *line)
+void *buddy_malloc(struct buddy_pool *pool, size_t size)
 {
-    long arg_max = sysconf(_SC_ARG_MAX);                  // max args
-    char **args = malloc(sizeof(char *) * (arg_max + 1)); // space for args
-    if (!args)                                            // memory issue error
-        return NULL;
-    char *temp = strdup(line);       // store input line
-    char *token = strtok(temp, " "); // tokenize it via spaces
-    int i = 0;
-    while (token && i < arg_max) // puts args into an array
+
+    //get the kval for the requested size with enough room for the tag and kval fields
+
+    //R1 Find a block
+
+    //There was not enough memory to satisfy the request thus we need to set error and return NULL
+
+    //R2 Remove from list;
+
+    //R3 Split required?
+
+    //R4 Split the block
+
+}
+
+void buddy_free(struct buddy_pool *pool, void *ptr)
+{
+
+}
+
+/**
+ * @brief This is a simple version of realloc.
+ *
+ * @param poolThe memory pool
+ * @param ptr  The user memory
+ * @param size the new size requested
+ * @return void* pointer to the new user memory
+ */
+void *buddy_realloc(struct buddy_pool *pool, void *ptr, size_t size)
+{
+    //Required for Grad Students
+    //Optional for Undergrad Students
+}
+
+void buddy_init(struct buddy_pool *pool, size_t size)
+{
+    size_t kval = 0;
+    if (size == 0)
+        kval = DEFAULT_K;
+    else
+        kval = btok(size);
+
+    if (kval < MIN_K)
+        kval = MIN_K;
+    if (kval > MAX_K)
+        kval = MAX_K - 1;
+
+    //make sure pool struct is cleared out
+    memset(pool,0,sizeof(struct buddy_pool));
+    pool->kval_m = kval;
+    pool->numbytes = (UINT64_C(1) << pool->kval_m);
+    //Memory map a block of raw memory to manage
+    pool->base = mmap(
+        NULL,                               /*addr to map to*/
+        pool->numbytes,                     /*length*/
+        PROT_READ | PROT_WRITE,             /*prot*/
+        MAP_PRIVATE | MAP_ANONYMOUS,        /*flags*/
+        -1,                                 /*fd -1 when using MAP_ANONYMOUS*/
+        0                                   /* offset 0 when using MAP_ANONYMOUS*/
+    );
+    if (MAP_FAILED == pool->base)
     {
-        args[i++] = strdup(token);
-        token = strtok(NULL, " "); // Get the next token/arg
+        handle_error_and_die("buddy_init avail array mmap failed");
     }
-    args[i] = NULL; // Null-terminated
-    free(temp);
-    return args;
-}
 
-// Free the memory allocated by cmd_parse for the argument list.
-void cmd_free(char **args)
-{
-    if (!args)
-        return;
-    for (int i = 0; args[i]; i++) // free each argument
+    //Set all blocks to empty. We are using circular lists so the first elements just point
+    //to an available block. Thus the tag, and kval feild are unused burning a small bit of
+    //memory but making the code more readable. We mark these blocks as UNUSED to aid in debugging.
+    for (size_t i = 0; i <= kval; i++)
     {
-        free(args[i]);
+        pool->avail[i].next = pool->avail[i].prev = &pool->avail[i];
+        pool->avail[i].kval = i;
+        pool->avail[i].tag = BLOCK_UNUSED;
     }
-    free(args); // Free the argument array
+
+    //Add in the first block
+    pool->avail[kval].next = pool->avail[kval].prev = (struct avail *)pool->base;
+    struct avail *m = pool->avail[kval].next;
+    m->tag = BLOCK_AVAIL;
+    m->kval = kval;
+    m->next = m->prev = &pool->avail[kval];
 }
 
-// Trim whitespace from both the start and the end of a string.
-char *trim_white(char *line)
+void buddy_destroy(struct buddy_pool *pool)
 {
-    char *end;
-    while (*line == ' ') // skip leading spaces
-        line++;
-    if (*line == 0) // return empty strings
-        return line;
-    end = line + strlen(line) - 1;    // end points to last character
-    while (end > line && *end == ' ') // remove trailing spaces
-        end--;
-    *(end + 1) = '\0'; // Null-terminated, trimmed string
-    return line;
-}
-
-// Check if the first argument is a built-in command (like exit, cd).
-bool do_builtin(struct shell *sh, char **argv)
-{
-    if (!argv[0])
-        return false;
-
-    if (strcmp(argv[0], "exit") == 0) // 'exit' frees args, then destroys and exits shell
+    int rval = munmap(pool->base, pool->numbytes);
+    if (-1 == rval)
     {
-        cmd_free(argv);
-        sh_destroy(sh);
-        exit(0);
+        handle_error_and_die("buddy_destroy avail array");
     }
-
-    if (strcmp(argv[0], "cd") == 0) //'cd' changes dir
-    {
-        change_dir(argv);
-        return true;
-    }
-
-     if (strcmp(argv[0], "history") == 0) {
-        HIST_ENTRY **history = history_list();
-        if (history) {
-            for (int i = 0; history[i]; i++) {
-                printf("%d %s\n", i + 1, history[i]->line);
-            }
-        }
-        return true;
-    }
-    return false;
+    //Zero out the array so it can be reused it needed
+    memset(pool,0,sizeof(struct buddy_pool));
 }
 
-// Set up signal handlers for the shell, ignoring certain signals.
-void setup_signals()
-{
-    signal(SIGINT, SIG_IGN);  //(Ctrl+C)
-    signal(SIGQUIT, SIG_IGN); //(Ctrl+\)
-    signal(SIGTSTP, SIG_IGN); //(Ctrl+Z)
-    signal(SIGTTIN, SIG_IGN);
-    signal(SIGTTOU, SIG_IGN);
-}
+#define UNUSED(x) (void)x
 
-// Initialize the shell. Allocate necessary data structures, gain control of the terminal, and set up the shell's process group.
-void sh_init(struct shell *sh)
+/**
+ * This function can be useful to visualize the bits in a block. This can
+ * help when figuring out the buddy_calc function!
+ */
+static void printb(unsigned long int b)
 {
-    sh->shell_terminal = STDIN_FILENO; // standard input is the terminal
-    sh->shell_is_interactive = isatty(sh->shell_terminal);
-    if (sh->shell_is_interactive) // If the shell is interactive, set up process group
-    {
-        while (tcgetpgrp(sh->shell_terminal) != (sh->shell_pgid = getpgrp())) // Wait until we control the terminal
-        {
-            kill(-sh->shell_pgid, SIGTTIN); // by killing the shell when we dont control the terminal
-        }
-        sh->shell_pgid = getpid();                        // process group ID
-        setpgid(sh->shell_pgid, sh->shell_pgid);          // process group
-        tcsetpgrp(sh->shell_terminal, sh->shell_pgid);    // terminal control
-        tcgetattr(sh->shell_terminal, &sh->shell_tmodes); // terminal settings
-    }
-}
-
-// Clean up the shell. Free allocated resources and exit the program.
-void sh_destroy(struct shell *sh)
-{
-    UNUSED(sh);
-    exit(0);
-}
-
-// Parse command-line arguments when the shell is launched.
-void parse_args(int argc, char **argv)
-{
-    for (int i = 1; i < argc; i++)
-    {
-        if (strcmp(argv[i], "-v") == 0) // Check for the '-v' flag
-        {
-            printf("Shell Version: %d.%d\n", lab_VERSION_MAJOR, lab_VERSION_MINOR); // Print the version
-            exit(EXIT_SUCCESS);                                                     // Exit after printing the version
-        }
-    }
+     size_t bits = sizeof(b) * 8;
+     unsigned long int curr = UINT64_C(1) << (bits - 1);
+     for (size_t i = 0; i < bits; i++)
+     {
+          if (b & curr)
+          {
+               printf("1");
+          }
+          else
+          {
+               printf("0");
+          }
+          curr >>= 1L;
+     }
 }
