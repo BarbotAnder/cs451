@@ -5,6 +5,11 @@
         "signal.h": "c",
         "fcntl.h": "c",
         "lab.h": "c",
-        "unity.h": "c"
+        "unity.h": "c",
+        "stddef.h": "c",
+        "time.h": "c",
+        "assert.h": "c",
+        "stdlib.h": "c",
+        "stdbool.h": "c"
     }
 }
