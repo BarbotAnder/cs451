@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-
 #ifdef __cplusplus
 extern "C"
 {
@@ -34,9 +33,9 @@ extern "C"
    */
 #define SMALLEST_K 6
 
-#define BLOCK_AVAIL    1  /*Block is available to allocate*/
-#define BLOCK_RESERVED 0  /*Block has been handed to user*/
-#define BLOCK_UNUSED   3  /*Block is not used at all*/
+#define BLOCK_AVAIL 1    /*Block is available to allocate*/
+#define BLOCK_RESERVED 0 /*Block has been handed to user*/
+#define BLOCK_UNUSED 3   /*Block is not used at all*/
 
   /**
    * Struct to represent the table of all available blocks do not reorder members
@@ -44,10 +43,10 @@ extern "C"
    */
   struct avail
   {
-    unsigned short int tag;     /*Tag for block status BLOCK_AVAIL, BLOCK_RESERVED*/
-    unsigned short int kval;    /*The kval of this block*/
-    struct avail *next;         /*next memory block*/
-    struct avail *prev;         /*prev memory block*/
+    unsigned short int tag;  /*Tag for block status BLOCK_AVAIL, BLOCK_RESERVED*/
+    unsigned short int kval; /*The kval of this block*/
+    struct avail *next;      /*next memory block*/
+    struct avail *prev;      /*prev memory block*/
   };
 
   /**
@@ -55,10 +54,10 @@ extern "C"
    */
   struct buddy_pool
   {
-    size_t kval_m;              /*The max kval of this pool*/
-    size_t numbytes;            /*The number of bytes this pool is managing*/
-    void *base;                 /*Base address used to scale memory for buddy calculations*/
-    struct avail avail[MAX_K];  /*The array of available memory blocks*/
+    size_t kval_m;             /*The max kval of this pool*/
+    size_t numbytes;           /*The number of bytes this pool is managing*/
+    void *base;                /*Base address used to scale memory for buddy calculations*/
+    struct avail avail[MAX_K]; /*The array of available memory blocks*/
   };
 
   /**
@@ -67,7 +66,6 @@ extern "C"
    * @return K The number of bytes expressed as 2^K
    */
   size_t btok(size_t bytes);
-
 
   /**
    * Find the buddy of a given pointer and kval relative to the base address we got from mmap
@@ -169,10 +167,16 @@ extern "C"
    * @param argv system argv
    * @return exit status
    */
-  int myMain(int argc, char** argv);
+  int myMain(int argc, char **argv);
+
+#ifdef DEBUG
+  #define DBG_PRINT(...) fprintf(stderr, __VA_ARGS__)
+#else
+  #define DBG_PRINT(...)
+#endif
 
 #ifdef __cplusplus
-} //extern "C"
+} // extern "C"
 #endif
 
 #endif

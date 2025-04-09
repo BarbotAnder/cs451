@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <assert.h>
 #include <signal.h>
-#include <execinfo.h>
+// #include <execinfo.h>
 #include <unistd.h>
 #include <time.h>
 #ifdef __APPLE__
@@ -15,6 +15,13 @@
 #endif
 
 #include "lab.h"
+
+#define DEBUG 1
+#if DEBUG
+#define DBG_PRINT(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define DBG_PRINT(...)
+#endif
 
 #define handle_error_and_die(msg) \
     do                            \
@@ -31,10 +38,12 @@
  */
 size_t btok(size_t bytes)
 {
-    size_t total = bytes + sizeof(struct avail);
     size_t k = SMALLEST_K;
-    while ((UINT64_C(1) << k) < total && k < MAX_K)
+    while ((UINT64_C(1) << k) < bytes && k < MAX_K)
         k++;
+    if (k < MIN_K)
+        k = MIN_K;
+    DBG_PRINT("btok(%zu) = %zu\n", bytes, k);
     return k;
 }
 
@@ -50,14 +59,22 @@ void *buddy_malloc(struct buddy_pool *pool, size_t size)
     if (pool == NULL || size == 0)
         return NULL;
 
-    // get the kval for the requested size with enough room for the tag and kval fields
+    // size + (kval & tag space)
     size_t k = btok(size);
+
+    //Is it large enough for user data and header?
+    if ((1UL << k) < size + sizeof(struct avail)) {
+        k++;
+    }
     size_t i = k;
 
     // R1 Find a block
+    DBG_PRINT("Starting block search for size %zu\n", (size_t)size);
     while (i <= pool->kval_m && pool->avail[i].next == &pool->avail[i])
+    {
+        DBG_PRINT("kval=%zu is an empty list, moving to next kval\n", i);
         i++;
-
+    }
     // There was not enough memory to satisfy the request thus we need to set error and return NULL
     if (i > pool->kval_m)
     {
@@ -69,10 +86,12 @@ void *buddy_malloc(struct buddy_pool *pool, size_t size)
     struct avail *block = pool->avail[i].next;
     block->prev->next = block->next;
     block->next->prev = block->prev;
+    block->kval = i;
 
     // R3 Split required?
     while (i > k)
     {
+        // R4 Split the block
         i--;
         uintptr_t buddy_addr = (uintptr_t)block + (UINT64_C(1) << i);
         struct avail *buddy = (struct avail *)buddy_addr;
@@ -84,9 +103,9 @@ void *buddy_malloc(struct buddy_pool *pool, size_t size)
         pool->avail[i].next = buddy;
         block->kval = i;
     }
-
-    // R4 Split the block
     block->tag = BLOCK_RESERVED;
+
+    DBG_PRINT("Allocated block at %p with kval=%zu\n", (void *)block, (size_t)block->kval);
     return (void *)((uint8_t *)block + sizeof(struct avail));
 }
 
@@ -97,30 +116,39 @@ void buddy_free(struct buddy_pool *pool, void *ptr)
 
     struct avail *block = (struct avail *)((uint8_t *)ptr - sizeof(struct avail));
     size_t k = block->kval;
-    struct avail *buddy;
+    DBG_PRINT("Freeing block at %p with kval=%zu\n", (void *)block, (size_t)k);
 
     while (k < pool->kval_m)
     {
-        buddy = buddy_calc(pool, block);
+        struct avail *buddy = buddy_calc(pool, block);
+        DBG_PRINT("  Checking buddy at %p (tag=%d kval=%zu)\n", (void *)buddy, buddy->tag, (size_t)buddy->kval);
 
         if (buddy->tag != BLOCK_AVAIL || buddy->kval != k)
             break;
 
+        DBG_PRINT("  -> Merging with buddy at %p\n", (void *)buddy);
+        // remove buddy from list
         buddy->prev->next = buddy->next;
         buddy->next->prev = buddy->prev;
 
+        // save lower memory address
         if ((void *)buddy < (void *)block)
             block = buddy;
 
         k++;
         block->kval = k;
+        DBG_PRINT("Merging completed. Block now at %p with kval=%zu\n", (void *)block, (size_t)k);
     }
 
+    struct avail *head = &pool->avail[k];
     block->tag = BLOCK_AVAIL;
-    block->next = pool->avail[k].next;
-    block->prev = &pool->avail[k];
-    pool->avail[k].next->prev = block;
-    pool->avail[k].next = block;
+
+    // insert block right after the head (circular doubly linked list)
+    block->next = head->next;
+    block->prev = head;
+    head->next->prev = block;
+    head->next = block;
+    DBG_PRINT("  -> Final block inserted at kval=%zu list: %p\n", (size_t)k, (void *)block);
 }
 
 /**
@@ -134,6 +162,7 @@ void buddy_free(struct buddy_pool *pool, void *ptr)
 void *buddy_realloc(struct buddy_pool *pool, void *ptr, size_t size)
 {
     // not properly tested, may not work
+    // TODO: test it
     if (!ptr)
         return buddy_malloc(pool, size);
     if (size == 0)
@@ -145,6 +174,7 @@ void *buddy_realloc(struct buddy_pool *pool, void *ptr, size_t size)
     struct avail *old_block = (struct avail *)((uint8_t *)ptr - sizeof(struct avail));
     size_t old_size = UINT64_C(1) << old_block->kval;
     size_t copy_size = old_size - sizeof(struct avail);
+    DBG_PRINT("Reallocating block %p from size %zu to size %zu\n", ptr, old_size, size);
 
     void *new_ptr = buddy_malloc(pool, size);
     if (new_ptr)
@@ -214,31 +244,8 @@ void buddy_destroy(struct buddy_pool *pool)
     memset(pool, 0, sizeof(struct buddy_pool));
 }
 
-// brief main for testing
-int myMain(int argc, char **argv)
-{
-    UNUSED(argc);
-    UNUSED(argv);
-
-    struct buddy_pool pool;
-    buddy_init(&pool, 0);
-
-    void *ptr1 = buddy_malloc(&pool, 1024);
-    void *ptr2 = buddy_malloc(&pool, 2048);
-
-    printf("Allocated ptr1: %p\n", ptr1);
-    printf("Allocated ptr2: %p\n", ptr2);
-
-    buddy_free(&pool, ptr1);
-    buddy_free(&pool, ptr2);
-
-    buddy_destroy(&pool);
-    printf("Memory pool destroyed successfully.\n");
-
-    return 0;
-}
-
-// idk what this is
+// idk what this macro is used for
+// TODO: understand it
 #define UNUSED(x) (void)x
 
 /**
@@ -261,4 +268,37 @@ static void printb(unsigned long int b)
         }
         curr >>= 1L;
     }
+}
+
+// brief main for testing
+int myMain(int argc, char **argv)
+{
+    UNUSED(argc);
+    UNUSED(argv);
+
+    struct buddy_pool pool;
+    buddy_init(&pool, 0);
+
+    void *ptr1 = buddy_malloc(&pool, 1024);
+    printf("Allocated ptr1: %p\n", ptr1);
+
+    struct avail *block1 = (struct avail *)((uint8_t *)ptr1 - sizeof(struct avail));
+    printf("Block 1 kval in binary: ");
+    printb(block1->kval);
+    printf("\n");
+
+    void *ptr2 = buddy_malloc(&pool, 2048);
+    printf("Allocated ptr2: %p\n", ptr2);
+    struct avail *block2 = (struct avail *)((uint8_t *)ptr2 - sizeof(struct avail));
+    printf("Block 2 kval in binary: ");
+    printb(block2->kval);
+    printf("\n");
+
+    buddy_free(&pool, ptr1);
+    buddy_free(&pool, ptr2);
+
+    buddy_destroy(&pool);
+    printf("Memory pool destroyed successfully.\n");
+
+    return 0;
 }

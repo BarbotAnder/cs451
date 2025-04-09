@@ -18,7 +18,7 @@ EXE_SRCS := $(shell find $(EXE_DIR) -name *.c)
 EXE_OBJS := $(EXE_SRCS:%=$(BUILD_DIR)/%.o)
 EXE_DEPS := $(EXE_OBJS:.o=.d)
 
-CFLAGS ?= -Wall -Wextra  -MMD -MP
+CFLAGS ?= -Wall -Wextra  -MMD -MP -DDEBUG
 DEBUG ?= -g
 SANATIZE ?= -fno-omit-frame-pointer -fsanitize=address
 

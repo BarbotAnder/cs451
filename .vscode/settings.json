@@ -10,6 +10,7 @@
         "time.h": "c",
         "assert.h": "c",
         "stdlib.h": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "errno.h": "c"
     }
 }
