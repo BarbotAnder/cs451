@@ -18,9 +18,6 @@ void tearDown(void) {
   // clean stuff up here
 }
 
-
-
-
 void test_create_destroy(void)
 {
     queue_t q = queue_init(10);
@@ -73,11 +70,59 @@ void test_queue_dequeue_shutdown(void)
     queue_destroy(q);
 }
 
+void test_shutdown_enqueue()
+{
+    queue_t q = queue_init(3);
+    int data = 5;
+    queue_shutdown(q);
+    enqueue(q, &data);  // Should do nothing
+    TEST_ASSERT_TRUE(is_empty(q));  // Queue should remain empty
+    queue_destroy(q);
+}
+
+void test_shutdown_dequeue()
+{
+    queue_t q = queue_init(3);
+    queue_shutdown(q);
+    void *result = dequeue(q);
+    TEST_ASSERT_NULL(result);
+    queue_destroy(q);
+}
+
+void test_wraparound()
+{
+    queue_t q = queue_init(2);
+    int a = 1, b = 2, c = 3;
+    enqueue(q, &a);
+    enqueue(q, &b);
+    TEST_ASSERT_EQUAL_PTR(&a, dequeue(q));  // Space opens
+    enqueue(q, &c);                         // Should go to slot 0 again
+    TEST_ASSERT_EQUAL_PTR(&b, dequeue(q));
+    TEST_ASSERT_EQUAL_PTR(&c, dequeue(q));
+    queue_destroy(q);
+}
+
+void test_fill_destroy() {
+  queue_t q = queue_init(2);
+  int a = 10, b = 20;
+  enqueue(q, &a);
+  enqueue(q, &b);
+  TEST_ASSERT_EQUAL_PTR(&a, dequeue(q));
+  TEST_ASSERT_EQUAL_PTR(&b, dequeue(q));
+  TEST_ASSERT_TRUE(is_empty(q));
+  queue_destroy(q);
+}
+
+
 int main(void) {
   UNITY_BEGIN();
   RUN_TEST(test_create_destroy);
   RUN_TEST(test_queue_dequeue);
   RUN_TEST(test_queue_dequeue_multiple);
   RUN_TEST(test_queue_dequeue_shutdown);
+  RUN_TEST(test_shutdown_dequeue);
+  RUN_TEST(test_shutdown_enqueue);
+  RUN_TEST(test_wraparound);
+  RUN_TEST(test_fill_destroy);
   return UNITY_END();
 }
